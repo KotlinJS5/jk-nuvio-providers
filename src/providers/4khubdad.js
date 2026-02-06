@@ -16,52 +16,69 @@ const HEADERS = {
  * Extract quality from text
  */
 function extractQuality(text) {
-    if (!text) return 'HD';
+    if (!text) return 1080;
     const text_lower = text.toLowerCase();
     
-    if (text_lower.includes('2160p') || text_lower.includes('4k')) return '2160p';
-    if (text_lower.includes('1440p')) return '1440p';
-    if (text_lower.includes('1080p')) return '1080p';
-    if (text_lower.includes('720p')) return '720p';
-    if (text_lower.includes('480p')) return '480p';
-    if (text_lower.includes('360p')) return '360p';
+    if (text_lower.includes('2160p') || text_lower.includes('4k')) return 2160;
+    if (text_lower.includes('1440p')) return 1440;
+    if (text_lower.includes('1080p')) return 1080;
+    if (text_lower.includes('720p')) return 720;
+    if (text_lower.includes('480p')) return 480;
+    if (text_lower.includes('360p')) return 360;
     
-    return 'HD';
+    return 1080;
 }
 
 /**
- * Extract size from text
+ * Format bytes to human readable
  */
-function extractSize(text) {
-    if (!text) return 'Unknown';
-    const match = text.match(/(\d+(?:\.\d+)?)\s*(GB|MB|TB)/i);
-    return match ? match[0] : 'Unknown';
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return 'Unknown';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+/**
+ * Get TMDB details
+ */
+function getTMDBDetails(tmdbId, mediaType) {
+    const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
+    const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}`;
+    
+    return fetch(url, { headers: HEADERS })
+        .then(res => {
+            if (!res.ok) throw new Error('TMDB error');
+            return res.json();
+        })
+        .then(data => {
+            const title = mediaType === 'tv' ? data.name : data.title;
+            const releaseDate = mediaType === 'tv' ? data.first_air_date : data.release_date;
+            const year = releaseDate ? parseInt(releaseDate.split('-')[0]) : null;
+            
+            return {
+                title: title,
+                year: year
+            };
+        });
 }
 
 /**
  * Main getStreams function - Promise-based (NO async/await)
  */
-function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
-    const isSeries = mediaType === 'tv';
-    const endpoint = isSeries ? 'tv' : 'movie';
-    
-    return fetch(`${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}`, { headers: HEADERS })
-        .then(res => {
-            if (!res.ok) throw new Error('TMDB API error');
-            return res.json();
-        })
-        .then(tmdbData => {
-            if (!tmdbData) throw new Error('No TMDB data');
-            
-            const title = isSeries ? tmdbData.name : tmdbData.title;
-            const year = isSeries 
-                ? (tmdbData.first_air_date ? parseInt(tmdbData.first_air_date.split('-')[0]) : 0)
-                : (tmdbData.release_date ? parseInt(tmdbData.release_date.split('-')[0]) : 0);
-            
-            if (!title) throw new Error('No title found');
+function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
+    return getTMDBDetails(tmdbId, mediaType)
+        .then(mediaInfo => {
+            if (!mediaInfo || !mediaInfo.title) {
+                console.error('[4KHDHub] No media info');
+                return [];
+            }
             
             // Search on 4khdhub
-            const searchUrl = `${KHUB_API}/?s=${encodeURIComponent(title)}`;
+            const searchUrl = `${KHUB_API}/?s=${encodeURIComponent(mediaInfo.title)}`;
             return fetch(searchUrl, { headers: HEADERS })
                 .then(res => {
                     if (!res.ok) throw new Error('Search failed');
@@ -80,10 +97,10 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
                         const text = $(el).text().toLowerCase();
                         
                         if (href && !href.includes('/category/') && !href.includes('/?s=') && text.length > 0) {
-                            if (text.includes(title.toLowerCase())) {
+                            if (text.includes(mediaInfo.title.toLowerCase())) {
                                 const yearMatch = text.match(/\b(19|20)\d{2}\b/);
                                 const itemYear = yearMatch ? parseInt(yearMatch[0]) : 0;
-                                const yearDiff = itemYear ? Math.abs(itemYear - year) : 5;
+                                const yearDiff = itemYear ? Math.abs(itemYear - mediaInfo.year) : 5;
                                 
                                 if (yearDiff <= 2 && yearDiff < bestMatch) {
                                     bestMatch = yearDiff;
@@ -105,7 +122,7 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
                             if (!pageHtml || pageHtml.length < 100) throw new Error('Empty page');
                             
                             const $page = cheerio.load(pageHtml);
-                            const streams = [];
+                            const collectedUrls = [];
                             
                             // Extract all download/stream links
                             $page('a').each((i, el) => {
@@ -125,29 +142,18 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
                                         text.includes('play')
                                     )) {
                                         // For TV shows, filter by season/episode
-                                        if (isSeries && seasonNum && episodeNum) {
-                                            const seasonStr = `s${seasonNum.toString().padStart(2, '0')}`;
-                                            const episodeStr = `e${episodeNum.toString().padStart(2, '0')}`;
+                                        if (season && episode) {
+                                            const seasonStr = `s${season.toString().padStart(2, '0')}`;
+                                            const episodeStr = `e${episode.toString().padStart(2, '0')}`;
                                             if (!text.includes(seasonStr) || !text.includes(episodeStr)) {
                                                 return;
                                             }
                                         }
                                         
-                                        const quality = extractQuality(text);
-                                        const size = extractSize(linkText);
                                         const finalUrl = href.startsWith('http') ? href : `${KHUB_API}${href}`;
-                                        
-                                        streams.push({
-                                            name: `4KHDHub - ${quality}`,
-                                            title: `${title} (${year})${size !== 'Unknown' ? ' | ' + size : ''}`,
+                                        collectedUrls.push({
                                             url: finalUrl,
-                                            quality: quality,
-                                            size: size,
-                                            provider: '4khubdad',
-                                            headers: {
-                                                'User-Agent': HEADERS['User-Agent'],
-                                                'Referer': bestUrl
-                                            }
+                                            text: linkText
                                         });
                                     }
                                 } catch (e) {
@@ -155,7 +161,45 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
                                 }
                             });
                             
-                            return streams.length > 0 ? streams : [];
+                            return collectedUrls;
+                        })
+                        .then(collectedUrls => {
+                            if (!collectedUrls.length) return [];
+                            
+                            // Format streams for Nuvio
+                            return collectedUrls.map(item => {
+                                const quality = extractQuality(item.text);
+                                let qualityStr = 'Unknown';
+                                
+                                if (quality >= 2160) qualityStr = '2160p';
+                                else if (quality >= 1440) qualityStr = '1440p';
+                                else if (quality >= 1080) qualityStr = '1080p';
+                                else if (quality >= 720) qualityStr = '720p';
+                                else if (quality >= 480) qualityStr = '480p';
+                                else if (quality >= 360) qualityStr = '360p';
+                                
+                                let title;
+                                if (season && episode) {
+                                    title = `${mediaInfo.title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+                                } else if (mediaInfo.year) {
+                                    title = `${mediaInfo.title} (${mediaInfo.year})`;
+                                } else {
+                                    title = mediaInfo.title;
+                                }
+                                
+                                return {
+                                    name: `4KHDHub - ${qualityStr}`,
+                                    title: title,
+                                    url: item.url,
+                                    quality: quality,
+                                    size: 0,
+                                    headers: {
+                                        'User-Agent': HEADERS['User-Agent'],
+                                        'Referer': bestUrl
+                                    },
+                                    provider: '4khubdad'
+                                };
+                            });
                         });
                 })
                 .catch(err => {
@@ -173,5 +217,5 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { getStreams };
 } else {
-    global.getStreams = getStreams;
+    global.getStreams = { getStreams };
 }
