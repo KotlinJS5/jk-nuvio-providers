@@ -1,25 +1,25 @@
 {
   "name": "JK Nuvio",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "scrapers": [
     {
-      "id": "4khubdad",
-      "name": "4KHDHub",
-      "description": "4KHDHub - Premium 4K/UHD streaming with multiple quality options",
-      "version": "1.0.0",
+      "id": "xdmovies",
+      "name": "XDMovies",
+      "description": "XDMovies - Premium streaming with multiple quality options and servers",
+      "version": "2.0.0",
       "author": "JK",
       "supportedTypes": [
         "movie",
         "tv"
       ],
-      "filename": "src/providers/4khubdad.js",
+      "filename": "src/providers/xdmovies.js",
       "enabled": true,
       "formats": [
         "mp4",
         "mkv",
         "m3u8"
       ],
-      "logo": "https://4khdhub.dad/favicon.ico",
+      "logo": "https://xdmovies.site/favicon.ico",
       "contentLanguage": [
         "en",
         "hi"
