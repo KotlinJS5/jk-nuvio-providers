@@ -1,7 +1,30 @@
 {
   "name": "JK Nuvio",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "scrapers": [
+    {
+      "id": "moviesdrive",
+      "name": "MoviesDrive",
+      "description": "MoviesDrive - Movies and TV shows with multiple streaming servers",
+      "version": "2.0.0",
+      "author": "JK",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "src/providers/moviesdrive.js",
+      "enabled": true,
+      "formats": [
+        "mp4",
+        "mkv",
+        "m3u8"
+      ],
+      "logo": "https://moviesdrive.forum/favicon.ico",
+      "contentLanguage": [
+        "en",
+        "hi"
+      ]
+    },
     {
       "id": "xdmovies",
       "name": "XDMovies",
@@ -26,23 +49,46 @@
       ]
     },
     {
-      "id": "moviesdrive",
-      "name": "MoviesDrive",
-      "description": "MoviesDrive - Movies and TV shows with multiple streaming servers",
+      "id": "hianime",
+      "name": "HiAnime",
+      "description": "HiAnime - Anime and Asian content streaming",
       "version": "2.0.0",
       "author": "JK",
       "supportedTypes": [
         "movie",
         "tv"
       ],
-      "filename": "src/providers/moviesdrive.js",
+      "filename": "src/providers/hianime.js",
       "enabled": true,
       "formats": [
         "mp4",
         "mkv",
         "m3u8"
       ],
-      "logo": "https://moviesdrive.forum/favicon.ico",
+      "logo": "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/Icons/hianime.png",
+      "contentLanguage": [
+        "en",
+        "hi"
+      ]
+    },
+    {
+      "id": "twoembed",
+      "name": "TwoEmbed",
+      "description": "TwoEmbed - Alternative streaming provider with multiple sources",
+      "version": "2.0.0",
+      "author": "JK",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "src/providers/twoembed.js",
+      "enabled": true,
+      "formats": [
+        "mp4",
+        "mkv",
+        "m3u8"
+      ],
+      "logo": "https://www.twoembed.com/favicon.ico",
       "contentLanguage": [
         "en",
         "hi"
