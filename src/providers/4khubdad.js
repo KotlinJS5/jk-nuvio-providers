@@ -30,16 +30,16 @@ function extractQuality(text) {
 }
 
 /**
- * Format bytes to human readable
+ * Format quality number to string
  */
-function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return 'Unknown';
-    
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+function formatQuality(quality) {
+    if (quality >= 2160) return '2160p';
+    if (quality >= 1440) return '1440p';
+    if (quality >= 1080) return '1080p';
+    if (quality >= 720) return '720p';
+    if (quality >= 480) return '480p';
+    if (quality >= 360) return '360p';
+    return 'Unknown';
 }
 
 /**
@@ -63,6 +63,10 @@ function getTMDBDetails(tmdbId, mediaType) {
                 title: title,
                 year: year
             };
+        })
+        .catch(err => {
+            console.error(`[4KHDHub] TMDB error: ${err.message}`);
+            throw err;
         });
 }
 
@@ -70,12 +74,15 @@ function getTMDBDetails(tmdbId, mediaType) {
  * Main getStreams function - Promise-based (NO async/await)
  */
 function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
-    return getTMDBDetails(tmdbId, mediaType)
+    return Promise.resolve()
+        .then(() => getTMDBDetails(tmdbId, mediaType))
         .then(mediaInfo => {
             if (!mediaInfo || !mediaInfo.title) {
-                console.error('[4KHDHub] No media info');
+                console.error('[4KHDHub] No media info from TMDB');
                 return [];
             }
+            
+            console.log(`[4KHDHub] Searching for: ${mediaInfo.title}`);
             
             // Search on 4khdhub
             const searchUrl = `${KHUB_API}/?s=${encodeURIComponent(mediaInfo.title)}`;
@@ -85,32 +92,48 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                     return res.text();
                 })
                 .then(html => {
-                    if (!html || html.length < 100) throw new Error('Empty search');
+                    if (!html || html.length < 100) throw new Error('Empty search response');
                     
                     const $ = cheerio.load(html);
-                    let bestUrl = null;
-                    let bestMatch = 100;
+                    const cards = $('a.movie-card');
+                    
+                    if (cards.length === 0) throw new Error('No search results');
+                    
+                    console.log(`[4KHDHub] Found ${cards.length} search results`);
                     
                     // Find best matching content
-                    $('a').each((i, el) => {
-                        const href = $(el).attr('href');
-                        const text = $(el).text().toLowerCase();
+                    let bestUrl = null;
+                    let bestTitle = null;
+                    let bestMatch = 999;
+                    
+                    cards.each((i, el) => {
+                        const $card = $(el);
+                        const href = $card.attr('href');
+                        const cardTitle = $card.find('.movie-card-title').text().toLowerCase();
+                        const meta = $card.find('.movie-card-meta').text();
                         
-                        if (href && !href.includes('/category/') && !href.includes('/?s=') && text.length > 0) {
-                            if (text.includes(mediaInfo.title.toLowerCase())) {
-                                const yearMatch = text.match(/\b(19|20)\d{2}\b/);
-                                const itemYear = yearMatch ? parseInt(yearMatch[0]) : 0;
-                                const yearDiff = itemYear ? Math.abs(itemYear - mediaInfo.year) : 5;
-                                
-                                if (yearDiff <= 2 && yearDiff < bestMatch) {
-                                    bestMatch = yearDiff;
-                                    bestUrl = href.startsWith('http') ? href : `${KHUB_API}${href}`;
-                                }
+                        // Extract year from meta if available
+                        const yearMatch = meta.match(/\b(19|20)\d{2}\b/);
+                        const cardYear = yearMatch ? parseInt(yearMatch[0]) : 0;
+                        
+                        // Check if title matches
+                        if (cardTitle.includes(mediaInfo.title.toLowerCase())) {
+                            const yearDiff = cardYear && mediaInfo.year ? Math.abs(cardYear - mediaInfo.year) : 0;
+                            
+                            if (yearDiff < bestMatch) {
+                                bestMatch = yearDiff;
+                                bestUrl = href.startsWith('http') ? href : `${KHUB_API}${href}`;
+                                bestTitle = cardTitle;
                             }
                         }
                     });
                     
-                    if (!bestUrl) throw new Error('No matching content');
+                    if (!bestUrl) {
+                        console.error(`[4KHDHub] No matching content found for ${mediaInfo.title}`);
+                        throw new Error('No matching content');
+                    }
+                    
+                    console.log(`[4KHDHub] Best match: ${bestTitle} (${bestUrl})`);
                     
                     // Fetch content page
                     return fetch(bestUrl, { headers: HEADERS })
@@ -119,40 +142,25 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                             return res.text();
                         })
                         .then(pageHtml => {
-                            if (!pageHtml || pageHtml.length < 100) throw new Error('Empty page');
+                            if (!pageHtml || pageHtml.length < 100) throw new Error('Empty content page');
                             
                             const $page = cheerio.load(pageHtml);
                             const collectedUrls = [];
                             
-                            // Extract all download/stream links
-                            $page('a').each((i, el) => {
+                            // Extract all download/stream links - simpler approach
+                            const links = $page('a[href]');
+                            console.log(`[4KHDHub] Checking ${links.length} links`);
+                            
+                            links.each((i, el) => {
                                 try {
-                                    const link = $page(el);
-                                    const href = link.attr('href');
-                                    const linkText = link.text();
-                                    const text = linkText.toLowerCase();
+                                    const $link = $page(el);
+                                    const href = $link.attr('href');
+                                    const linkText = $link.text().trim();
                                     
-                                    if (href && (
-                                        href.includes('hubcloud') || 
-                                        href.includes('drive') || 
-                                        href.includes('download') ||
-                                        text.includes('download') || 
-                                        text.includes('watch') || 
-                                        text.includes('stream') ||
-                                        text.includes('play')
-                                    )) {
-                                        // For TV shows, filter by season/episode
-                                        if (season && episode) {
-                                            const seasonStr = `s${season.toString().padStart(2, '0')}`;
-                                            const episodeStr = `e${episode.toString().padStart(2, '0')}`;
-                                            if (!text.includes(seasonStr) || !text.includes(episodeStr)) {
-                                                return;
-                                            }
-                                        }
-                                        
-                                        const finalUrl = href.startsWith('http') ? href : `${KHUB_API}${href}`;
+                                    // Simple check: if href contains gadgetsweb, it's a download link
+                                    if (href && href.includes('gadgetsweb')) {
                                         collectedUrls.push({
-                                            url: finalUrl,
+                                            url: href,
                                             text: linkText
                                         });
                                     }
@@ -161,22 +169,19 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                 }
                             });
                             
+                            console.log(`[4KHDHub] Extracted ${collectedUrls.length} download links`);
                             return collectedUrls;
                         })
                         .then(collectedUrls => {
-                            if (!collectedUrls.length) return [];
+                            if (!collectedUrls.length) {
+                                console.error('[4KHDHub] No download links found');
+                                return [];
+                            }
                             
                             // Format streams for Nuvio
-                            return collectedUrls.map(item => {
+                            const streams = collectedUrls.map((item, idx) => {
                                 const quality = extractQuality(item.text);
-                                let qualityStr = 'Unknown';
-                                
-                                if (quality >= 2160) qualityStr = '2160p';
-                                else if (quality >= 1440) qualityStr = '1440p';
-                                else if (quality >= 1080) qualityStr = '1080p';
-                                else if (quality >= 720) qualityStr = '720p';
-                                else if (quality >= 480) qualityStr = '480p';
-                                else if (quality >= 360) qualityStr = '360p';
+                                const qualityStr = formatQuality(quality);
                                 
                                 let title;
                                 if (season && episode) {
@@ -200,15 +205,18 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     provider: '4khubdad'
                                 };
                             });
+                            
+                            console.log(`[4KHDHub] Returning ${streams.length} streams`);
+                            return streams;
                         });
                 })
                 .catch(err => {
-                    console.error(`[4KHDHub] Error: ${err.message}`);
+                    console.error(`[4KHDHub] Search error: ${err.message}`);
                     return [];
                 });
         })
         .catch(err => {
-            console.error(`[4KHDHub] Error: ${err.message}`);
+            console.error(`[4KHDHub] Fatal error: ${err.message}`);
             return [];
         });
 }
